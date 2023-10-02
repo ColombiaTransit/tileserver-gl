@@ -54,7 +54,6 @@ const cachedEmptyResponses = {
 
 /**
  * Create an appropriate mlgl response for http errors.
- *
  * @param {string} format The format (a sharp format or 'pbf').
  * @param {string} color The background color (or empty string for transparent).
  * @param {Function} callback The mlgl callback.
@@ -102,7 +101,6 @@ function createEmptyResponse(format, color, callback) {
 /**
  * Parses coordinate pair provided to pair of floats and ensures the resulting
  * pair is a longitude/latitude combination depending on lnglat query parameter.
- *
  * @param {List} coordinatePair Coordinate pair.
  * @param coordinates
  * @param {object} query Request query parameters.
@@ -127,7 +125,6 @@ const parseCoordinatePair = (coordinates, query) => {
 
 /**
  * Parses a coordinate pair from query arguments and optionally transforms it.
- *
  * @param {List} coordinatePair Coordinate pair.
  * @param {object} query Request query parameters.
  * @param {Function} transformer Optional transform function.
@@ -145,7 +142,6 @@ const parseCoordinates = (coordinatePair, query, transformer) => {
 
 /**
  * Parses paths provided via query into a list of path objects.
- *
  * @param {object} query Request query parameters.
  * @param {Function} transformer Optional transform function.
  */
@@ -166,21 +162,12 @@ const extractPathsFromQuery = (query, transformer) => {
         providedPath.includes('enc:') &&
         PATH_PATTERN.test(decodeURIComponent(providedPath))
       ) {
-        const encodedPaths = providedPath.split(',');
-        for (const path of encodedPaths) {
-          const line = path
-            .split('|')
-            .filter(
-              (x) =>
-                !x.startsWith('fill') &&
-                !x.startsWith('stroke') &&
-                !x.startsWith('width'),
-            )
-            .join('')
-            .replace('enc:', '');
-          const coords = polyline.decode(line).map(([lat, lng]) => [lng, lat]);
-          paths.push(coords);
-        }
+        // +4 because 'enc:' is 4 characters, everything after 'enc:' is considered to be part of the polyline
+        const encIndex = providedPath.indexOf('enc:') + 4;
+        const coords = polyline
+          .decode(providedPath.substring(encIndex))
+          .map(([lat, lng]) => [lng, lat]);
+        paths.push(coords);
       } else {
         // Iterate through paths, parse and validate them
         const currentPath = [];
@@ -220,7 +207,6 @@ const extractPathsFromQuery = (query, transformer) => {
  * on marker object.
  * Options adhere to the following format
  * [optionName]:[optionValue]
- *
  * @param {List[String]} optionsList List of option strings.
  * @param {object} marker Marker object to configure.
  */
@@ -255,7 +241,6 @@ const parseMarkerOptions = (optionsList, marker) => {
 
 /**
  * Parses markers provided via query into a list of marker objects.
- *
  * @param {object} query Request query parameters.
  * @param {object} options Configuration options.
  * @param {Function} transformer Optional transform function.
@@ -335,7 +320,6 @@ const extractMarkersFromQuery = (query, options, transformer) => {
 
 /**
  * Transforms coordinates to pixels.
- *
  * @param {List[Number]} ll Longitude/Latitude coordinate pair.
  * @param {number} zoom Map zoom level.
  */
@@ -347,7 +331,6 @@ const precisePx = (ll, zoom) => {
 
 /**
  * Draws a marker in cavans context.
- *
  * @param {object} ctx Canvas context object.
  * @param {object} marker Marker object parsed by extractMarkersFromQuery.
  * @param {number} z Map zoom level.
@@ -419,7 +402,6 @@ const drawMarker = (ctx, marker, z) => {
  * Wraps drawing of markers into list of promises and awaits them.
  * It's required because images are expected to load asynchronous in canvas js
  * even when provided from a local disk.
- *
  * @param {object} ctx Canvas context object.
  * @param {List[Object]} markers Marker objects parsed by extractMarkersFromQuery.
  * @param {number} z Map zoom level.
@@ -438,117 +420,107 @@ const drawMarkers = async (ctx, markers, z) => {
 
 /**
  * Draws a list of coordinates onto a canvas and styles the resulting path.
- *
  * @param {object} ctx Canvas context object.
  * @param {List[Number]} path List of coordinates.
  * @param {object} query Request query parameters.
+ * @param {string} pathQuery Path query parameter.
  * @param {number} z Map zoom level.
  */
-const drawPath = (ctx, path, query, z) => {
-  const renderPath = (splitPaths) => {
-    if (!path || path.length < 2) {
-      return null;
+const drawPath = (ctx, path, query, pathQuery, z) => {
+  const splitPaths = decodeURIComponent(pathQuery).split('|');
+
+  if (!path || path.length < 2) {
+    return null;
+  }
+
+  ctx.beginPath();
+
+  // Transform coordinates to pixel on canvas and draw lines between points
+  for (const pair of path) {
+    const px = precisePx(pair, z);
+    ctx.lineTo(px[0], px[1]);
+  }
+
+  // Check if first coordinate matches last coordinate
+  if (
+    path[0][0] === path[path.length - 1][0] &&
+    path[0][1] === path[path.length - 1][1]
+  ) {
+    ctx.closePath();
+  }
+
+  // Optionally fill drawn shape with a rgba color from query
+  const pathHasFill = splitPaths.filter((x) => x.startsWith('fill')).length > 0;
+  if (query.fill !== undefined || pathHasFill) {
+    if ('fill' in query) {
+      ctx.fillStyle = query.fill || 'rgba(255,255,255,0.4)';
     }
-
-    ctx.beginPath();
-
-    // Transform coordinates to pixel on canvas and draw lines between points
-    for (const pair of path) {
-      const px = precisePx(pair, z);
-      ctx.lineTo(px[0], px[1]);
+    if (pathHasFill) {
+      ctx.fillStyle = splitPaths
+        .find((x) => x.startsWith('fill:'))
+        .replace('fill:', '');
     }
+    ctx.fill();
+  }
 
-    // Check if first coordinate matches last coordinate
-    if (
-      path[0][0] === path[path.length - 1][0] &&
-      path[0][1] === path[path.length - 1][1]
-    ) {
-      ctx.closePath();
+  // Get line width from query and fall back to 1 if not provided
+  const pathHasWidth =
+    splitPaths.filter((x) => x.startsWith('width')).length > 0;
+  if (query.width !== undefined || pathHasWidth) {
+    let lineWidth = 1;
+    // Get line width from query
+    if ('width' in query) {
+      lineWidth = Number(query.width);
     }
-
-    // Optionally fill drawn shape with a rgba color from query
-    const pathHasFill =
-      splitPaths.filter((x) => x.startsWith('fill')).length > 0;
-    if (query.fill !== undefined || pathHasFill) {
-      if ('fill' in query) {
-        ctx.fillStyle = query.fill || 'rgba(255,255,255,0.4)';
-      }
-      if (pathHasFill) {
-        ctx.fillStyle = splitPaths
-          .find((x) => x.startsWith('fill:'))
-          .replace('fill:', '');
-      }
-      ctx.fill();
+    // Get line width from path in query
+    if (pathHasWidth) {
+      lineWidth = Number(
+        splitPaths.find((x) => x.startsWith('width:')).replace('width:', ''),
+      );
     }
+    // Get border width from query and fall back to 10% of line width
+    const borderWidth =
+      query.borderwidth !== undefined
+        ? parseFloat(query.borderwidth)
+        : lineWidth * 0.1;
 
-    // Get line width from query and fall back to 1 if not provided
-    const pathHasWidth =
-      splitPaths.filter((x) => x.startsWith('width')).length > 0;
-    if (query.width !== undefined || pathHasWidth) {
-      let lineWidth = 1;
-      // Get line width from query
-      if ('width' in query) {
-        lineWidth = Number(query.width);
-      }
-      // Get line width from path in query
-      if (pathHasWidth) {
-        lineWidth = Number(
-          splitPaths.find((x) => x.startsWith('width:')).replace('width:', ''),
-        );
-      }
-      // Get border width from query and fall back to 10% of line width
-      const borderWidth =
-        query.borderwidth !== undefined
-          ? parseFloat(query.borderwidth)
-          : lineWidth * 0.1;
+    // Set rendering style for the start and end points of the path
+    // https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/lineCap
+    ctx.lineCap = query.linecap || 'butt';
 
-      // Set rendering style for the start and end points of the path
-      // https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/lineCap
-      ctx.lineCap = query.linecap || 'butt';
+    // Set rendering style for overlapping segments of the path with differing directions
+    // https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/lineJoin
+    ctx.lineJoin = query.linejoin || 'miter';
 
-      // Set rendering style for overlapping segments of the path with differing directions
-      // https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/lineJoin
-      ctx.lineJoin = query.linejoin || 'miter';
-
-      // In order to simulate a border we draw the path two times with the first
-      // beeing the wider border part.
-      if (query.border !== undefined && borderWidth > 0) {
-        // We need to double the desired border width and add it to the line width
-        // in order to get the desired border on each side of the line.
-        ctx.lineWidth = lineWidth + borderWidth * 2;
-        // Set border style as rgba
-        ctx.strokeStyle = query.border;
-        ctx.stroke();
-      }
-      ctx.lineWidth = lineWidth;
+    // In order to simulate a border we draw the path two times with the first
+    // beeing the wider border part.
+    if (query.border !== undefined && borderWidth > 0) {
+      // We need to double the desired border width and add it to the line width
+      // in order to get the desired border on each side of the line.
+      ctx.lineWidth = lineWidth + borderWidth * 2;
+      // Set border style as rgba
+      ctx.strokeStyle = query.border;
+      ctx.stroke();
     }
+    ctx.lineWidth = lineWidth;
+  }
 
-    const pathHasStroke =
-      splitPaths.filter((x) => x.startsWith('stroke')).length > 0;
-    if (query.stroke !== undefined || pathHasStroke) {
-      if ('stroke' in query) {
-        ctx.strokeStyle = query.stroke;
-      }
-      // Path Width gets higher priority
-      if (pathHasWidth) {
-        ctx.strokeStyle = splitPaths
-          .find((x) => x.startsWith('stroke:'))
-          .replace('stroke:', '');
-      }
-    } else {
-      ctx.strokeStyle = 'rgba(0,64,255,0.7)';
+  const pathHasStroke =
+    splitPaths.filter((x) => x.startsWith('stroke')).length > 0;
+  if (query.stroke !== undefined || pathHasStroke) {
+    if ('stroke' in query) {
+      ctx.strokeStyle = query.stroke;
     }
-    ctx.stroke();
-  };
-
-  // Check if path in query is valid
-  if (Array.isArray(query.path)) {
-    for (let i = 0; i < query.path.length; i += 1) {
-      renderPath(decodeURIComponent(query.path.at(i)).split('|'));
+    // Path Stroke gets higher priority
+    if (pathHasStroke) {
+      ctx.strokeStyle = splitPaths
+        .find((x) => x.startsWith('stroke:'))
+        .replace('stroke:', '');
     }
   } else {
-    renderPath(decodeURIComponent(query.path).split('|'));
+    ctx.strokeStyle = 'rgba(0,64,255,0.7)';
   }
+  ctx.stroke();
 };
 
 const renderOverlay = async (
@@ -592,9 +564,10 @@ const renderOverlay = async (
   }
 
   // Draw provided paths if any
-  for (const path of paths) {
-    drawPath(ctx, path, query, z);
-  }
+  paths.forEach((path, i) => {
+    const pathQuery = Array.isArray(query.path) ? query.path.at(i) : query.path;
+    drawPath(ctx, path, query, pathQuery, z);
+  });
 
   // Await drawing of markers before rendering the canvas
   await drawMarkers(ctx, markers, z);
@@ -897,34 +870,117 @@ export const serve_rendered = {
       app.get(
         util.format(staticPattern, centerPattern),
         async (req, res, next) => {
+          try {
+            const item = repo[req.params.id];
+            if (!item) {
+              return res.sendStatus(404);
+            }
+            const raw = req.params.raw;
+            const z = +req.params.z;
+            let x = +req.params.x;
+            let y = +req.params.y;
+            const bearing = +(req.params.bearing || '0');
+            const pitch = +(req.params.pitch || '0');
+            const w = req.params.width | 0;
+            const h = req.params.height | 0;
+            const scale = getScale(req.params.scale);
+            const format = req.params.format;
+
+            if (z < 0) {
+              return res.status(404).send('Invalid zoom');
+            }
+
+            const transformer = raw
+              ? mercator.inverse.bind(mercator)
+              : item.dataProjWGStoInternalWGS;
+
+            if (transformer) {
+              const ll = transformer([x, y]);
+              x = ll[0];
+              y = ll[1];
+            }
+
+            const paths = extractPathsFromQuery(req.query, transformer);
+            const markers = extractMarkersFromQuery(
+              req.query,
+              options,
+              transformer,
+            );
+            const overlay = await renderOverlay(
+              z,
+              x,
+              y,
+              bearing,
+              pitch,
+              w,
+              h,
+              scale,
+              paths,
+              markers,
+              req.query,
+            );
+
+            return respondImage(
+              item,
+              z,
+              x,
+              y,
+              bearing,
+              pitch,
+              w,
+              h,
+              scale,
+              format,
+              res,
+              next,
+              overlay,
+              'static',
+            );
+          } catch (e) {
+            next(e);
+          }
+        },
+      );
+
+      const serveBounds = async (req, res, next) => {
+        try {
           const item = repo[req.params.id];
           if (!item) {
             return res.sendStatus(404);
           }
           const raw = req.params.raw;
-          const z = +req.params.z;
-          let x = +req.params.x;
-          let y = +req.params.y;
-          const bearing = +(req.params.bearing || '0');
-          const pitch = +(req.params.pitch || '0');
-          const w = req.params.width | 0;
-          const h = req.params.height | 0;
-          const scale = getScale(req.params.scale);
-          const format = req.params.format;
-
-          if (z < 0) {
-            return res.status(404).send('Invalid zoom');
-          }
+          const bbox = [
+            +req.params.minx,
+            +req.params.miny,
+            +req.params.maxx,
+            +req.params.maxy,
+          ];
+          let center = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
 
           const transformer = raw
             ? mercator.inverse.bind(mercator)
             : item.dataProjWGStoInternalWGS;
 
           if (transformer) {
-            const ll = transformer([x, y]);
-            x = ll[0];
-            y = ll[1];
+            const minCorner = transformer(bbox.slice(0, 2));
+            const maxCorner = transformer(bbox.slice(2));
+            bbox[0] = minCorner[0];
+            bbox[1] = minCorner[1];
+            bbox[2] = maxCorner[0];
+            bbox[3] = maxCorner[1];
+            center = transformer(center);
           }
+
+          const w = req.params.width | 0;
+          const h = req.params.height | 0;
+          const scale = getScale(req.params.scale);
+          const format = req.params.format;
+
+          const z = calcZForBBox(bbox, w, h, req.query);
+          const x = center[0];
+          const y = center[1];
+          const bearing = 0;
+          const pitch = 0;
 
           const paths = extractPathsFromQuery(req.query, transformer);
           const markers = extractMarkersFromQuery(
@@ -945,7 +1001,6 @@ export const serve_rendered = {
             markers,
             req.query,
           );
-
           return respondImage(
             item,
             z,
@@ -962,83 +1017,9 @@ export const serve_rendered = {
             overlay,
             'static',
           );
-        },
-      );
-
-      const serveBounds = async (req, res, next) => {
-        const item = repo[req.params.id];
-        if (!item) {
-          return res.sendStatus(404);
+        } catch (e) {
+          next(e);
         }
-        const raw = req.params.raw;
-        const bbox = [
-          +req.params.minx,
-          +req.params.miny,
-          +req.params.maxx,
-          +req.params.maxy,
-        ];
-        let center = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
-
-        const transformer = raw
-          ? mercator.inverse.bind(mercator)
-          : item.dataProjWGStoInternalWGS;
-
-        if (transformer) {
-          const minCorner = transformer(bbox.slice(0, 2));
-          const maxCorner = transformer(bbox.slice(2));
-          bbox[0] = minCorner[0];
-          bbox[1] = minCorner[1];
-          bbox[2] = maxCorner[0];
-          bbox[3] = maxCorner[1];
-          center = transformer(center);
-        }
-
-        const w = req.params.width | 0;
-        const h = req.params.height | 0;
-        const scale = getScale(req.params.scale);
-        const format = req.params.format;
-
-        const z = calcZForBBox(bbox, w, h, req.query);
-        const x = center[0];
-        const y = center[1];
-        const bearing = 0;
-        const pitch = 0;
-
-        const paths = extractPathsFromQuery(req.query, transformer);
-        const markers = extractMarkersFromQuery(
-          req.query,
-          options,
-          transformer,
-        );
-        const overlay = await renderOverlay(
-          z,
-          x,
-          y,
-          bearing,
-          pitch,
-          w,
-          h,
-          scale,
-          paths,
-          markers,
-          req.query,
-        );
-        return respondImage(
-          item,
-          z,
-          x,
-          y,
-          bearing,
-          pitch,
-          w,
-          h,
-          scale,
-          format,
-          res,
-          next,
-          overlay,
-          'static',
-        );
       };
 
       const boundsPattern = util.format(
@@ -1078,97 +1059,101 @@ export const serve_rendered = {
       app.get(
         util.format(staticPattern, autoPattern),
         async (req, res, next) => {
-          const item = repo[req.params.id];
-          if (!item) {
-            return res.sendStatus(404);
+          try {
+            const item = repo[req.params.id];
+            if (!item) {
+              return res.sendStatus(404);
+            }
+            const raw = req.params.raw;
+            const w = req.params.width | 0;
+            const h = req.params.height | 0;
+            const bearing = 0;
+            const pitch = 0;
+            const scale = getScale(req.params.scale);
+            const format = req.params.format;
+
+            const transformer = raw
+              ? mercator.inverse.bind(mercator)
+              : item.dataProjWGStoInternalWGS;
+
+            const paths = extractPathsFromQuery(req.query, transformer);
+            const markers = extractMarkersFromQuery(
+              req.query,
+              options,
+              transformer,
+            );
+
+            // Extract coordinates from markers
+            const markerCoordinates = [];
+            for (const marker of markers) {
+              markerCoordinates.push(marker.location);
+            }
+
+            // Create array with coordinates from markers and path
+            const coords = [].concat(paths.flat()).concat(markerCoordinates);
+
+            // Check if we have at least one coordinate to calculate a bounding box
+            if (coords.length < 1) {
+              return res.status(400).send('No coordinates provided');
+            }
+
+            const bbox = [Infinity, Infinity, -Infinity, -Infinity];
+            for (const pair of coords) {
+              bbox[0] = Math.min(bbox[0], pair[0]);
+              bbox[1] = Math.min(bbox[1], pair[1]);
+              bbox[2] = Math.max(bbox[2], pair[0]);
+              bbox[3] = Math.max(bbox[3], pair[1]);
+            }
+
+            const bbox_ = mercator.convert(bbox, '900913');
+            const center = mercator.inverse([
+              (bbox_[0] + bbox_[2]) / 2,
+              (bbox_[1] + bbox_[3]) / 2,
+            ]);
+
+            // Calculate zoom level
+            const maxZoom = parseFloat(req.query.maxzoom);
+            let z = calcZForBBox(bbox, w, h, req.query);
+            if (maxZoom > 0) {
+              z = Math.min(z, maxZoom);
+            }
+
+            const x = center[0];
+            const y = center[1];
+
+            const overlay = await renderOverlay(
+              z,
+              x,
+              y,
+              bearing,
+              pitch,
+              w,
+              h,
+              scale,
+              paths,
+              markers,
+              req.query,
+            );
+
+            return respondImage(
+              item,
+              z,
+              x,
+              y,
+              bearing,
+              pitch,
+              w,
+              h,
+              scale,
+              format,
+              res,
+              next,
+              overlay,
+              'static',
+            );
+          } catch (e) {
+            next(e);
           }
-          const raw = req.params.raw;
-          const w = req.params.width | 0;
-          const h = req.params.height | 0;
-          const bearing = 0;
-          const pitch = 0;
-          const scale = getScale(req.params.scale);
-          const format = req.params.format;
-
-          const transformer = raw
-            ? mercator.inverse.bind(mercator)
-            : item.dataProjWGStoInternalWGS;
-
-          const paths = extractPathsFromQuery(req.query, transformer);
-          const markers = extractMarkersFromQuery(
-            req.query,
-            options,
-            transformer,
-          );
-
-          // Extract coordinates from markers
-          const markerCoordinates = [];
-          for (const marker of markers) {
-            markerCoordinates.push(marker.location);
-          }
-
-          // Create array with coordinates from markers and path
-          const coords = [].concat(paths.flat()).concat(markerCoordinates);
-
-          // Check if we have at least one coordinate to calculate a bounding box
-          if (coords.length < 1) {
-            return res.status(400).send('No coordinates provided');
-          }
-
-          const bbox = [Infinity, Infinity, -Infinity, -Infinity];
-          for (const pair of coords) {
-            bbox[0] = Math.min(bbox[0], pair[0]);
-            bbox[1] = Math.min(bbox[1], pair[1]);
-            bbox[2] = Math.max(bbox[2], pair[0]);
-            bbox[3] = Math.max(bbox[3], pair[1]);
-          }
-
-          const bbox_ = mercator.convert(bbox, '900913');
-          const center = mercator.inverse([
-            (bbox_[0] + bbox_[2]) / 2,
-            (bbox_[1] + bbox_[3]) / 2,
-          ]);
-
-          // Calculate zoom level
-          const maxZoom = parseFloat(req.query.maxzoom);
-          let z = calcZForBBox(bbox, w, h, req.query);
-          if (maxZoom > 0) {
-            z = Math.min(z, maxZoom);
-          }
-
-          const x = center[0];
-          const y = center[1];
-
-          const overlay = await renderOverlay(
-            z,
-            x,
-            y,
-            bearing,
-            pitch,
-            w,
-            h,
-            scale,
-            paths,
-            markers,
-            req.query,
-          );
-
-          return respondImage(
-            item,
-            z,
-            x,
-            y,
-            bearing,
-            pitch,
-            w,
-            h,
-            scale,
-            format,
-            res,
-            next,
-            overlay,
-            'static',
-          );
         },
       );
     }
