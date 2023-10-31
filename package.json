@@ -1,6 +1,6 @@
 {
   "name": "tileserver-gl",
-  "version": "4.6.2",
+  "version": "4.6.5",
   "description": "Map tile server for JSON GL styles - vector and server side generated raster tiles",
   "main": "src/main.js",
   "bin": "src/main.js",
@@ -39,15 +39,15 @@
     "morgan": "1.10.0",
     "pbf": "3.2.1",
     "pmtiles": "2.11.0",
-    "proj4": "2.9.1",
+    "proj4": "2.9.2",
     "request": "2.88.2",
     "sanitize-filename": "1.6.3",
     "sharp": "0.32.6",
     "tileserver-gl-styles": "2.0.0"
   },
   "devDependencies": {
-    "@commitlint/cli": "^18.0.0",
-    "@commitlint/config-conventional": "^18.0.0",
+    "@commitlint/cli": "^18.2.0",
+    "@commitlint/config-conventional": "^18.1.0",
     "@typescript-eslint/eslint-plugin": "^5.61.0",
     "@typescript-eslint/parser": "^5.62.0",
     "chai": "4.3.10",
