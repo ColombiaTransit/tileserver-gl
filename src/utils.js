@@ -7,6 +7,38 @@ import clone from 'clone';
 import glyphCompose from '@mapbox/glyph-pbf-composite';
 
 /**
+ * Restrict user input to an allowed set of options.
+ * @param opts
+ * @param root0
+ * @param root0.defaultValue
+ */
+export function allowedOptions(opts, { defaultValue } = {}) {
+  const values = Object.fromEntries(opts.map((key) => [key, key]));
+  return (value) => values[value] || defaultValue;
+}
+
+/**
+ * Replace local:// urls with public http(s):// urls
+ * @param req
+ * @param url
+ * @param publicUrl
+ */
+export function fixUrl(req, url, publicUrl) {
+  if (!url || typeof url !== 'string' || url.indexOf('local://') !== 0) {
+    return url;
+  }
+  const queryParams = [];
+  if (req.query.key) {
+    queryParams.unshift(`key=${encodeURIComponent(req.query.key)}`);
+  }
+  let query = '';
+  if (queryParams.length) {
+    query = `?${queryParams.join('&')}`;
+  }
+  return url.replace('local://', getPublicUrl(publicUrl, req)) + query;
+}
+
+/**
  * Generate new URL object
  * @param req
  * @params {object} req - Express request
@@ -16,6 +48,12 @@ const getUrlObject = (req) => {
   const urlObject = new URL(`${req.protocol}://${req.headers.host}/`);
   // support overriding hostname by sending X-Forwarded-Host http header
   urlObject.hostname = req.hostname;
+
+  // support add url prefix by sending X-Forwarded-Path http header
+  const xForwardedPath = req.get('X-Forwarded-Path');
+  if (xForwardedPath) {
+    urlObject.pathname = path.posix.join(xForwardedPath, urlObject.pathname);
+  }
   return urlObject;
 };
 
@@ -82,9 +120,10 @@ export const getTileUrls = (
 
   const uris = [];
   if (!publicUrl) {
+    let xForwardedPath = `${req.get('X-Forwarded-Path') ? '/' + req.get('X-Forwarded-Path') : ''}`;
     for (const domain of domains) {
       uris.push(
-        `${req.protocol}://${domain}/${path}/${tileParams}.${format}${query}`,
+        `${req.protocol}://${domain}${xForwardedPath}/${path}/${tileParams}.${format}${query}`,
       );
     }
   } else {
