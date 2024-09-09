@@ -94,24 +94,23 @@ function start(opts) {
   paths.sprites = path.resolve(paths.root, paths.sprites || '');
   paths.mbtiles = path.resolve(paths.root, paths.mbtiles || '');
   paths.pmtiles = path.resolve(paths.root, paths.pmtiles || '');
-  paths.icons = path.resolve(paths.root, paths.icons || '');
+  paths.icons = paths.icons
+    ? path.resolve(paths.root, paths.icons)
+    : path.resolve(__dirname, '../public/resources/images');
+  paths.files = paths.files
+    ? path.resolve(paths.root, paths.files)
+    : path.resolve(__dirname, '../public/files');
 
   const startupPromises = [];
 
-  const checkPath = (type) => {
+  for (const type of Object.keys(paths)) {
     if (!fs.existsSync(paths[type])) {
       console.error(
         `The specified path for "${type}" does not exist (${paths[type]}).`,
       );
       process.exit(1);
     }
-  };
-  checkPath('styles');
-  checkPath('fonts');
-  checkPath('sprites');
-  checkPath('mbtiles');
-  checkPath('pmtiles');
-  checkPath('icons');
+  }
 
   /**
    * Recursively get all files within a directory.
@@ -161,6 +160,7 @@ function start(opts) {
   }
 
   app.use('/data/', serve_data.init(options, serving.data));
+  app.use('/files/', express.static(paths.files));
   app.use('/styles/', serve_style.init(options, serving.styles));
   if (!isLight) {
     startupPromises.push(

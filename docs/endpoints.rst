@@ -77,7 +77,7 @@ Static images
         * scales with ``scale`` parameter since image placement is relative to it's size
         * e.g. ``2,-4`` - Image will be moved 2 pixel to the right and 4 pixel in the upwards direction from the provided location
 
-    * e.g. ``5.9,45.8|marker-start.svg|scale:0.5|offset:2,-4``
+    * e.g. ``5.9,45.8|marker-icon.png|scale:0.5|offset:2,-4``
     * can be provided multiple times
 
   * ``padding`` - "percentage" padding for fitted endpoints (area-based and path autofit)
@@ -99,6 +99,18 @@ Source data
     * ``geojson`` is also available (useful for inspecting the tiles) in case the original format is ``pbf``
 
   * TileJSON at ``/data/{id}.json``
+
+Static files
+===========
+* Static files are served at ``/files/{filename}``
+
+  * The source folder can be configured (``options.paths.files``), default is ``public/files``
+
+  * This feature can be used to serve ``geojson`` files for styles and rendered tiles.
+
+    * Keep in mind, that each rendered tile loads the whole geojson file, if performance matters a conversion to a tiled format (e.g. with https://github.com/felt/tippecanoe)may be a better approch.
+
+    * Use ``file://{filename}`` to have matching paths for both endoints
 
 TileJSON arrays
 ===============
