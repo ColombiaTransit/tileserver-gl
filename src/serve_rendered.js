@@ -1202,10 +1202,30 @@ export const serve_rendered = {
                 parsedResponse.data = responseData;
                 callback(null, parsedResponse);
               } catch (error) {
-                const parts = url.parse(req.url);
-                const extension = path.extname(parts.pathname).toLowerCase();
-                const format = extensionToFormat[extension] || '';
-                createEmptyResponse(format, '', callback);
+                if (error.response && error.response.status === 410) {
+                  // This is the 410 "Gone" error, treat as sparse
+                  if (verbose) {
+                    console.log(
+                      'fetchTile warning on %s, sparse response due to 410 Gone',
+                      req.url,
+                    );
+                  }
+                  callback();
+                } else {
+                  // For all other errors (e.g., network errors, 404, 500, etc.) return empty content.
+                  console.error(
+                    `Error fetching remote URL ${req.url}:`,
+                    error.message || error,
+                    error.response
+                      ? `Status: ${error.response.status}`
+                      : 'No response received',
+                  );
+
+                  const parts = url.parse(req.url);
+                  const extension = path.extname(parts.pathname).toLowerCase();
+                  const format = extensionToFormat[extension] || '';
+                  createEmptyResponse(format, '', callback);
+                }
               }
             } else if (protocol === 'file') {
               const name = decodeURI(req.url).substring(protocol.length + 3);
@@ -1411,7 +1431,7 @@ export const serve_rendered = {
         if (sourceType === 'pmtiles') {
           map.sources[name] = openPMtiles(inputFile);
           map.sourceTypes[name] = 'pmtiles';
-          const metadata = await getPMtilesInfo(map.sources[name]);
+          const metadata = await getPMtilesInfo(map.sources[name], inputFile);
 
           if (!repoobj.dataProjWGStoInternalWGS && metadata.proj4) {
             // how to do this for multiple sources with different proj4 defs?
